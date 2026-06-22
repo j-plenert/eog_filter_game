@@ -27,6 +27,11 @@ from scipy.signal import welch
 
 PREFERRED_PORT = "/dev/cu.usbmodem101" # # port prüfen mit: ls /dev/cu.* (at least for Mac)
 BAUD_RATE = 115200
+
+# Set a short tag for the current player BEFORE they start (e.g. "p01", initials,
+# or age group). It is written to every row of results/eye_runner_learning_rounds.csv
+# so that, once many people have played, you can group the statistics by person.
+PARTICIPANT_ID = "anonymous"
 ADC_MINIMUM = 0
 ADC_MAXIMUM = 65535
 
@@ -52,12 +57,16 @@ LANE_CENTERS = [
 ]
 
 GAME_DURATION_SECONDS = 60.0
-STARTING_LIVES = 5
+# --- Difficulty knobs (turn these up/down to taste) ---
+# EOG steering is slow: every lane change needs an eye saccade out AND a return
+# to centre before the next one registers. The runner is therefore tuned to be
+# forgiving so the player can keep up.
+STARTING_LIVES = 8
 PLAYER_WIDTH = 74
 PLAYER_HEIGHT = 46
 PLAYER_Y = HEIGHT - 120
-BASE_OBSTACLE_SPEED = 250.0
-SPEED_INCREASE_PER_SECOND = 1.2
+BASE_OBSTACLE_SPEED = 170.0
+SPEED_INCREASE_PER_SECOND = 0.5
 ROUND_RANDOM_SEED = 42
 POINTS_PER_AVOIDED_OBSTACLE = 100
 COLLISION_PENALTY = 100
@@ -67,10 +76,14 @@ COLLISION_PENALTY = 100
 # player must steer the impulse into the clean gate, so every row demands one
 # clear LEFT/RIGHT decision.
 GATE_HEIGHT = 58
-GATE_SPAWN_INTERVAL = 1.25
+GATE_SPAWN_INTERVAL = 2.4
+# Fraction of gates that keep the clean lane under the player ("rest beats"):
+# no eye movement needed, giving the player a moment to recover between
+# deliberate saccades. Set to 0.0 to force a decision on every gate.
+REST_GATE_PROBABILITY = 0.30
 # Quick tutorial window at the start of the runner that labels the impulse and
 # explains the controls before the first gate appears.
-ONBOARDING_SECONDS = 3.0
+ONBOARDING_SECONDS = 4.5
 
 CALIBRATION_CENTER_SECONDS = 3.0
 CALIBRATION_CUE_SECONDS = 1.3
@@ -115,15 +128,35 @@ for folder in (DATA_DIRECTORY, PLOT_DIRECTORY, RESULT_DIRECTORY):
 # Paths are resolved relative to this Python file, so the game also works
 # when it is started from another working directory.
 BASE_DIRECTORY = Path(__file__).resolve().parent
-HELMHOLTZ_IMAGE_CANDIDATES = [
-    BASE_DIRECTORY / "images" / "helmholtz_help.png",
-    BASE_DIRECTORY / "assets" / "helmholtz_help.png",
-    BASE_DIRECTORY / "helmholtz_help.png",
+# Image files are looked up in these directories, in order.
+HELMHOLTZ_IMAGE_DIRECTORIES = [
+    BASE_DIRECTORY / "images",
+    BASE_DIRECTORY / "assets",
+    BASE_DIRECTORY,
 ]
-HELMHOLTZ_IMAGE_PATH = next(
-    (path for path in HELMHOLTZ_IMAGE_CANDIDATES if path.exists()),
-    HELMHOLTZ_IMAGE_CANDIDATES[0],
+
+
+def find_image_path(filename):
+    """Return the first existing path for an image file, or None."""
+
+    for directory in HELMHOLTZ_IMAGE_DIRECTORIES:
+        candidate = directory / filename
+        if candidate.exists():
+            return candidate
+    return None
+
+
+HELMHOLTZ_IMAGE_PATH = (
+    find_image_path("helmholtz_help.png")
+    or HELMHOLTZ_IMAGE_DIRECTORIES[0] / "helmholtz_help.png"
 )
+
+# Mood portraits shown in the final report, chosen by the runner score.
+HELMHOLTZ_MOOD_FILES = {
+    "super_happy": "helmholtz_super_happy.png",
+    "happy": "helmholtz_happy.png",
+    "angry": "helmholtz_angry.png",
+}
 
 FILTER_TYPES = ["Raw", "Highpass", "EMA Smooth", "Moving Average"]
 
@@ -455,16 +488,24 @@ def draw_wrapped_text_fit(
     return y, chosen_size
 
 
-def load_helmholtz_image(maximum_size):
-    """Load and scale the optional Helmholtz image without crashing."""
+_SCALED_IMAGE_CACHE = {}
 
-    if not HELMHOLTZ_IMAGE_PATH.exists():
+
+def load_scaled_image(path, maximum_size):
+    """Load and scale an image to fit, caching the result. Returns None on failure."""
+
+    if path is None or not Path(path).exists():
         return None
 
+    cache_key = (str(path), maximum_size)
+    if cache_key in _SCALED_IMAGE_CACHE:
+        return _SCALED_IMAGE_CACHE[cache_key]
+
     try:
-        image = pygame.image.load(str(HELMHOLTZ_IMAGE_PATH)).convert_alpha()
+        image = pygame.image.load(str(path)).convert_alpha()
     except (pygame.error, OSError) as error:
-        print(f"Could not load Helmholtz image: {error}")
+        print(f"Could not load image {path}: {error}")
+        _SCALED_IMAGE_CACHE[cache_key] = None
         return None
 
     maximum_width, maximum_height = maximum_size
@@ -476,7 +517,38 @@ def load_helmholtz_image(maximum_size):
         max(1, int(image.get_width() * scale)),
         max(1, int(image.get_height() * scale)),
     )
-    return pygame.transform.smoothscale(image, new_size)
+    scaled = pygame.transform.smoothscale(image, new_size)
+    _SCALED_IMAGE_CACHE[cache_key] = scaled
+    return scaled
+
+
+def load_helmholtz_image(maximum_size):
+    """Load and scale the optional Helmholtz help image without crashing."""
+
+    return load_scaled_image(HELMHOLTZ_IMAGE_PATH, maximum_size)
+
+
+def helmholtz_mood_for_result(summary):
+    """Pick the professor's mood from the runner result.
+
+    Full marks (a flawless run with no collisions) -> super happy,
+    a pointless run (zero score) -> angry, anything in between -> happy.
+    """
+
+    if summary["collisions"] == 0 and summary["avoided_obstacles"] > 0:
+        return "super_happy"
+    if summary["score"] <= 0:
+        return "angry"
+    return "happy"
+
+
+def load_helmholtz_mood_image(mood, maximum_size):
+    """Load the scaled portrait for a mood, or None if the file is missing."""
+
+    filename = HELMHOLTZ_MOOD_FILES.get(mood)
+    if filename is None:
+        return None
+    return load_scaled_image(find_image_path(filename), maximum_size)
 
 
 def draw_helmholtz_placeholder(screen, rectangle):
@@ -2321,11 +2393,18 @@ def run_game(screen, clock, serial_reader, processor, detector, config):
                     event_file.flush()
 
             # Spawn one forced-choice gate row per beat (after the tutorial).
-            # The clean gate is biased away from the current lane so that every
-            # row needs at least one deliberate LEFT/RIGHT eye movement.
+            # The clean gate sits at most one lane away from the player, so every
+            # row needs exactly one deliberate LEFT/RIGHT eye movement (or, on a
+            # rest beat, none) -- never an impossible double saccade.
             if elapsed >= next_spawn_time:
-                other_lanes = [lane for lane in range(LANE_COUNT) if lane != current_lane]
-                goal_lane = rng.choice(other_lanes or list(range(LANE_COUNT)))
+                adjacent_lanes = [
+                    lane for lane in (current_lane - 1, current_lane + 1)
+                    if 0 <= lane < LANE_COUNT
+                ]
+                if rng.random() < REST_GATE_PROBABILITY or not adjacent_lanes:
+                    goal_lane = current_lane
+                else:
+                    goal_lane = rng.choice(adjacent_lanes)
                 gates.append({"id": next_gate_id, "goal_lane": goal_lane, "y": ROAD_TOP - GATE_HEIGHT, "resolved": False})
                 next_gate_id += 1
                 log_game_event(event_writer, elapsed, "gate_spawn", current_lane, current_lane, goal_lane, score, streak, lives)
@@ -2486,6 +2565,38 @@ def show_game_summary(screen, clock, summary, science_metrics, prediction):
         "smooth_slow": "Smooth but slow",
     }
 
+    accuracy = science_metrics["science_accuracy_percent"]
+    reaction = science_metrics["science_median_reaction_ms"]
+    false_positives = science_metrics["science_false_positives"]
+
+    left_rows = [
+        ("Accuracy", f"{accuracy:.1f} %"),
+        ("False positives", false_positives),
+        ("Wrong responses", science_metrics["science_wrong"]),
+        ("Missed responses", science_metrics["science_misses"]),
+        ("Median reaction", (
+            f"{reaction:.0f} ms" if np.isfinite(reaction) else "n/a"
+        )),
+        ("Prediction", prediction_labels.get(prediction, prediction)),
+    ]
+    right_rows = [
+        ("Score", summary["score"]),
+        ("Avoided obstacles", summary["avoided_obstacles"]),
+        ("Collisions", summary["collisions"]),
+        ("EOG left / right", (
+            f"{summary['eog_left_commands']} / {summary['eog_right_commands']}"
+        )),
+        ("Longest streak", summary["longest_streak"]),
+        ("Filter", summary["filter_type"]),
+    ]
+
+    mood = helmholtz_mood_for_result(summary)
+    mood_image = load_helmholtz_mood_image(mood, (300, 180))
+
+    left_panel = pygame.Rect(55, 108, 415, 348)
+    right_panel = pygame.Rect(530, 108, 415, 348)
+    portrait_center = (WIDTH // 2, 562)
+
     while True:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -2497,77 +2608,47 @@ def show_game_summary(screen, clock, summary, science_metrics, prediction):
             ):
                 return
 
-        accuracy = science_metrics["science_accuracy_percent"]
-        reaction = science_metrics["science_median_reaction_ms"]
-        false_positives = science_metrics["science_false_positives"]
-
-        if accuracy >= 85 and summary["collisions"] <= 1:
-            helmholtz_feedback = "Extraordinary! The filter was both accurate and useful in the game."
-            feedback_color = SUCCESS
-        elif accuracy >= 60:
-            helmholtz_feedback = "Good work! Your filter works, but its parameters can still improve."
-            feedback_color = ACCENT
-        else:
-            helmholtz_feedback = "The Noisepocalypse wins this round. Rebuild the filter and compare again."
-            feedback_color = DANGER
-
         screen.fill(BACKGROUND)
-        draw_text(
-            screen,
-            "FINAL LEARNING REPORT",
-            (WIDTH // 2, 55),
-            40,
-            center=True,
-            bold=True,
-        )
-        draw_text(
-            screen,
-            helmholtz_feedback,
-            (WIDTH // 2, 100),
-            21,
-            feedback_color,
-            center=True,
-            bold=True,
-        )
 
-        draw_text(screen, "CONTROLLED TEST", (270, 155), 27, ACCENT, center=True, bold=True)
-        draw_text(screen, "RUNNER", (735, 155), 27, ACCENT, center=True, bold=True)
+        # Title with a thin underline and a small centre chevron.
+        draw_text(screen, "FINAL LEARNING REPORT", (WIDTH // 2, 48), 42, center=True, bold=True)
+        pygame.draw.line(screen, STORY_BORDER, (250, 88), (470, 88), 2)
+        pygame.draw.line(screen, STORY_BORDER, (530, 88), (750, 88), 2)
+        pygame.draw.lines(screen, STORY_CYAN, False, [(486, 83), (500, 94), (514, 83)], 2)
 
-        left_rows = [
-            ("Accuracy", f"{accuracy:.1f} %"),
-            ("False positives", false_positives),
-            ("Wrong responses", science_metrics["science_wrong"]),
-            ("Missed responses", science_metrics["science_misses"]),
-            ("Median reaction", (
-                f"{reaction:.0f} ms" if np.isfinite(reaction) else "n/a"
-            )),
-            ("Prediction", prediction_labels.get(prediction, prediction)),
-        ]
-        right_rows = [
-            ("Score", summary["score"]),
-            ("Avoided obstacles", summary["avoided_obstacles"]),
-            ("Collisions", summary["collisions"]),
-            ("EOG left / right", (
-                f"{summary['eog_left_commands']} / {summary['eog_right_commands']}"
-            )),
-            ("Longest streak", summary["longest_streak"]),
-            ("Filter", summary["filter_type"]),
-        ]
+        # Result boxes: one panel per data source, header inside the box.
+        for panel, title, rows in (
+            (left_panel, "CONTROLLED TEST", left_rows),
+            (right_panel, "RUNNER", right_rows),
+        ):
+            draw_tech_panel(screen, panel)
+            draw_text(screen, title, (panel.centerx, panel.top + 30), 28,
+                      STORY_CYAN, center=True, bold=True)
+            row_top = panel.top + 74
+            for index, (label, value) in enumerate(rows):
+                y = row_top + index * 48
+                draw_text(screen, label, (panel.left + 30, y), 23)
+                draw_text(screen, str(value), (panel.right - 75, y), 23, ACCENT, center=True)
+                if index < len(rows) - 1:
+                    line_y = y + 34
+                    pygame.draw.line(screen, (40, 46, 62),
+                                     (panel.left + 24, line_y), (panel.right - 24, line_y), 1)
 
-        for index, (label, value) in enumerate(left_rows):
-            y = 205 + index * 52
-            draw_text(screen, label, (80, y), 23)
-            draw_text(screen, value, (405, y), 23, ACCENT, center=True)
-
-        for index, (label, value) in enumerate(right_rows):
-            y = 205 + index * 52
-            draw_text(screen, label, (535, y), 23)
-            draw_text(screen, value, (900, y), 23, ACCENT, center=True)
+        # Helmholtz reacts to the runner result (super happy / happy / angry).
+        # The image carries his spoken feedback in its own speech bubble.
+        if mood_image is not None:
+            image_rect = mood_image.get_rect(center=portrait_center)
+            draw_tech_panel(screen, image_rect.inflate(18, 18))
+            screen.blit(mood_image, image_rect)
+        else:
+            placeholder = pygame.Rect(0, 0, 240, 180)
+            placeholder.center = portrait_center
+            draw_helmholtz_placeholder(screen, placeholder)
 
         draw_text(
             screen,
             "SPACE: save plots and exit",
-            (WIDTH // 2, 650),
+            (WIDTH // 2, 678),
             23,
             center=True,
         )
@@ -2998,9 +3079,21 @@ def main():
                 selected_config,
             )
 
-            combined_summary = dict(game_summary)
+            # One analysis-ready row per round. Front-load the columns that matter
+            # for the statistics so the CSV is easy to read and group later.
+            runner_total = game_summary["avoided_obstacles"] + game_summary["collisions"]
+            runner_accuracy = (
+                100.0 * game_summary["avoided_obstacles"] / runner_total
+                if runner_total else float("nan")
+            )
+            combined_summary = {
+                "participant_id": PARTICIPANT_ID,
+                "timestamp": game_summary["timestamp"],
+                "prediction": prediction,
+                "runner_accuracy_percent": runner_accuracy,
+            }
+            combined_summary.update(game_summary)
             combined_summary.update(science_metrics)
-            combined_summary["prediction"] = prediction
 
             summary_path = append_round_summary(combined_summary)
 

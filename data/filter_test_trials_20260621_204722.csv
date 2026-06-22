@@ -1,0 +1,13 @@
+trial,target,response,outcome,reaction_time_ms,false_positives_before_cue
+1,left,left,correct,433.66158301068936,1
+2,right,left,wrong,94.84074999636505,1
+3,left,,miss,,0
+4,left,left,correct,352.5399589998415,0
+5,right,left,wrong,192.0502910070354,0
+6,left,left,correct,273.29633400950115,1
+7,right,right,correct,420.22983299102634,0
+8,right,right,correct,471.78866701142397,0
+9,right,right,correct,423.4367919998476,0
+10,right,right,correct,334.9469590029912,0
+11,left,left,correct,305.76229200232774,0
+12,left,left,correct,375.65095799800474,0
