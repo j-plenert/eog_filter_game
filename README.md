@@ -7,6 +7,14 @@ through a three-lane runner using only **left/right glances**.
 
 The signal comes from your eyes via **EOG** (electrooculography), streamed over an ESP32.
 
+## Game Story
+
+You are Professor Hermann von Helmholtz’s assistant, and unfortunately, his latest experiment has gone completely wrong.
+
+The machine is drowning in noise, only one clean nerve impulse remains, and naturally, it is now your job to fix everything.
+
+Build the right filter, rescue the signal, and save Helmholtz’s experiment before the whole lab turns into electrical chaos.
+
 ## What it does
 
 One continuous flow from raw signal to analysis:
@@ -32,23 +40,13 @@ One continuous flow from raw signal to analysis:
 - Three surface electrodes + electrode cables
 - USB cable and a computer running the Python game
 
-The AD8232 amplifies the analog EOG signal; the ESP32 reads it with its internal ADC and sends
-one numerical value per line over serial:
-
-```text
-Baud rate: 115200
-Data format: one ADC value per line
-```
-
-> **ADC range:** the game expects `ADC_MINIMUM = 0 … ADC_MAXIMUM = 65535` (see the settings at the
-> top of `Helmholtz_Noisepocalypse.py`). A bare ESP32 ADC returns `0–4095`; the larger range is only
-> correct if your firmware scales the values. Adjust the constants to match your firmware.
-
 ## Hardware Setup
 
-### Complete setup
-
-<img src="images/hardware_setup.pdf" alt="Complete hardware setup" width="600">
+<p align="left">
+  <img src="images/hardware_setup.png"
+       alt="Complete hardware setup"
+       width="600">
+</p>
 
 ESP32, AD8232, electrode cables, USB connection and the computer.
 
@@ -62,7 +60,7 @@ ESP32, AD8232, electrode cables, USB connection and the computer.
 
 The exact analog pin depends on your firmware – update the diagram to match the pin used in your code.
 
-### Electrode placement (horizontal montage)
+## Electrode placement (horizontal montage)
 
 <p align="left"> <img src="images/eog_placement.png" alt="EOG electrode placement" width="500"> </p>
 
