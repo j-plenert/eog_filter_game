@@ -48,13 +48,9 @@ Data format: one ADC value per line
 
 ### Complete setup
 
-![Complete hardware setup](images/hardware_setup.jpg)
+<img src="images/hardware_setup.pdf" alt="Complete hardware setup" width="600">
 
 ESP32, AD8232, electrode cables, USB connection and the computer.
-
-### Wiring (AD8232 → ESP32)
-
-![ESP32 and AD8232 wiring](images/wiring_diagram.png)
 
 | AD8232   | ESP32                    |
 | -------- | ------------------------ |
@@ -68,17 +64,17 @@ The exact analog pin depends on your firmware – update the diagram to match th
 
 ### Electrode placement (horizontal montage)
 
-![EOG electrode placement](images/eog_electrode_placement.png)
-
+<p align="left"> <img src="images/eog_placement.png" alt="EOG electrode placement" width="500"> </p>
 
 Keep the left and right electrodes at roughly the same height so horizontal glances produce a clean,
 symmetric deflection.
 
 ## Safety
 
-> ⚠️ Only use equipment designed for safe biopotential measurement. Electrodes attached to the body
-> must never be connected to mains-referenced circuits — use a battery-powered or galvanically
-> isolated setup. This is an educational experiment, **not a medical device**.
+> ⚠️ When electrodes are attached to a person, the measurement
+> hardware must not be directly connected to mains-powered equipment.
+> Do not use a desktop computer, a charging laptop, a laboratory power supply,
+> or a standard oscilloscope without suitable medical-grade isolation.
 
 ## Installation
 
@@ -86,7 +82,7 @@ Python 3.10+ recommended.
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+source .venv/bin/activate          
 pip install pygame pyserial numpy pandas matplotlib scipy
 ```
 
@@ -112,20 +108,6 @@ pip install pygame pyserial numpy pandas matplotlib scipy
    ```
 
 Runner controls: **glance left/right** (via EOG). The ←/→ arrow keys work as a fallback. `ESC` quits.
-
-## Which filter performs best?
-
-There is no single best filter — it is a trade-off. Saccades are strong, low-frequency steps, so
-they are detected most reliably when you **remove the baseline drift _and_ smooth the high-frequency
-noise** (i.e. `EMA Smooth` or `Moving Average`), but stronger smoothing adds lag. The
-`SCIENTIFIC FILTER REPORT` makes the trade-off measurable:
-
-- **Accuracy** high (≥ 80 %)
-- **False commands at center** low (≤ 2)
-- **Median reaction time** still low enough for comfortable control
-- **Noise reduction** clearly visible
-
-The best filter balances **noise robustness ↔ reaction speed**.
 
 ## How the filters are built
 
