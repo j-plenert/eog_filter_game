@@ -38,7 +38,7 @@ One continuous flow from raw signal to analysis:
 <p align="left">
   <img src="images/hardware_setup.png"
        alt="Complete hardware setup"
-       width="500">
+       width="350">
 </p>
 
 ESP32, AD8232, electrode cables, USB connection and the computer.
