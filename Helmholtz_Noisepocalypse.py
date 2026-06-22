@@ -65,8 +65,8 @@ STARTING_LIVES = 8
 PLAYER_WIDTH = 74
 PLAYER_HEIGHT = 46
 PLAYER_Y = HEIGHT - 120
-BASE_OBSTACLE_SPEED = 170.0
-SPEED_INCREASE_PER_SECOND = 0.5
+BASE_OBSTACLE_SPEED = 140.0
+SPEED_INCREASE_PER_SECOND = 0.4
 ROUND_RANDOM_SEED = 42
 POINTS_PER_AVOIDED_OBSTACLE = 100
 COLLISION_PENALTY = 100
@@ -1717,22 +1717,12 @@ def draw_science_phase(screen, trial_number, phase, target, response):
         center=True,
     )
 
+    # Show only the visual stimulus (fixation cross or left/right target) -- no
+    # text telling the participant where to look, so the saccade stays natural.
     if phase in ("fixation", "return"):
         draw_fixation_cross(screen)
-        instruction = "Look at the center and stay relaxed."
     else:
         draw_calibration_target(screen, target)
-        instruction = f"LOOK {target.upper()}"
-
-    draw_text(
-        screen,
-        instruction,
-        (WIDTH // 2, 165),
-        29,
-        ACCENT if phase == "cue" else MUTED,
-        center=True,
-        bold=phase == "cue",
-    )
 
     if response:
         draw_text(
@@ -2204,9 +2194,9 @@ def draw_onboarding_hint(screen, lane):
     overlay.fill((10, 14, 22, 205))
     screen.blit(overlay, (0, ROAD_TOP + 6))
 
-    draw_text(screen, "Steer the CYAN gate, dodge the red artifacts",
+    draw_text(screen, "Keep your gaze on the CENTRE arrow",
               (WIDTH // 2, ROAD_TOP + 30), 26, ACCENT, center=True, bold=True)
-    draw_text(screen, "Move only your EYES left / right to change lane",
+    draw_text(screen, "Glance the way it points - a white flash confirms each move",
               (WIDTH // 2, ROAD_TOP + 66), 22, FOREGROUND, center=True)
 
     # Arrow + label pointing at the player impulse.
@@ -2228,6 +2218,64 @@ def log_game_event(writer, event_time, event_type, lane_before, lane_after, obst
         "lives": lives,
         "details": details,
     })
+
+
+def draw_action_cue(screen, center, direction, fraction_remaining,
+                    confirmed=False, locked=False):
+    """Central steering instruction so the player can keep their gaze centred.
+
+    direction: "left", "right" or "stay". A shrinking ring shows how much time
+    is left before the active gate resolves. ``confirmed`` flashes the cue bright
+    white right after an eye movement was detected, so the player does not need to
+    look away to check whether the glance registered. ``locked`` means the move is
+    already committed for this gate: the cue shows a muted "LOCKED" dot until the
+    gate has passed.
+    """
+
+    cx, cy = center
+    radius = 48
+
+    # Translucent backing disc so the cue stays readable over the moving road.
+    disc = pygame.Surface((2 * radius + 40, 2 * radius + 40), pygame.SRCALPHA)
+    pygame.draw.circle(disc, (10, 14, 22, 210),
+                       (disc.get_width() // 2, disc.get_height() // 2), radius + 16)
+    screen.blit(disc, (cx - disc.get_width() // 2, cy - disc.get_height() // 2))
+
+    if locked:
+        base_color = MUTED
+    elif direction == "stay":
+        base_color = SUCCESS
+    else:
+        base_color = ACCENT
+    symbol_color = (255, 255, 255) if confirmed else base_color
+
+    # Background ring + shrinking timer arc.
+    pygame.draw.circle(screen, (50, 58, 76), (cx, cy), radius, width=4)
+    if fraction_remaining > 0.0:
+        ring_rect = pygame.Rect(cx - radius, cy - radius, 2 * radius, 2 * radius)
+        start_angle = np.pi / 2.0
+        pygame.draw.arc(screen, base_color, ring_rect,
+                        start_angle, start_angle + 2.0 * np.pi * fraction_remaining, width=6)
+
+    # Symbol: while locked just a muted dot; otherwise an arrow towards the
+    # needed lane, or a dot when already in the correct lane.
+    if locked or direction == "stay":
+        pygame.draw.circle(screen, symbol_color, (cx, cy), 17)
+    elif direction == "left":
+        pygame.draw.polygon(screen, symbol_color,
+                            [(cx + 16, cy - 22), (cx + 16, cy + 22), (cx - 22, cy)])
+    elif direction == "right":
+        pygame.draw.polygon(screen, symbol_color,
+                            [(cx - 16, cy - 22), (cx - 16, cy + 22), (cx + 22, cy)])
+
+    if confirmed:
+        pygame.draw.circle(screen, (255, 255, 255), (cx, cy), radius + 12, width=3)
+
+    if locked:
+        caption = "LOCKED"
+    else:
+        caption = {"left": "LOOK LEFT", "right": "LOOK RIGHT", "stay": "HOLD"}[direction]
+    draw_text(screen, caption, (cx, cy + radius + 22), 24, base_color, center=True, bold=True)
 
 
 def run_game(screen, clock, serial_reader, processor, detector, config):
@@ -2258,6 +2306,11 @@ def run_game(screen, clock, serial_reader, processor, detector, config):
 
     flash_until = -1.0
     flash_color = ACCENT
+    confirm_until = -1.0
+    # One committed saccade per gate: after a move the lane locks until the
+    # active gate has passed, then the next saccade is accepted again.
+    lane_locked = False
+    last_gate_was_rest = False
     next_spawn_time = ONBOARDING_SECONDS
     sample_number = 0
     centered_value = 0.0
@@ -2312,7 +2365,7 @@ def run_game(screen, clock, serial_reader, processor, detector, config):
                 baseline_value, highpass_value, filtered_value = processor.process(raw_value)
                 detected_event, centered_value = detector.update(filtered_value, sample_time)
 
-                if detected_event is not None:
+                if detected_event is not None and not lane_locked:
                     lane_before = current_lane
                     lane_after = move_lane(
                         current_lane,
@@ -2320,9 +2373,15 @@ def run_game(screen, clock, serial_reader, processor, detector, config):
                     )
 
                     current_lane = lane_after
+                    # Commit this move: ignore further saccades until the active
+                    # gate has passed.
+                    lane_locked = True
                     eog_commands += 1
                     last_detected_event = detected_event
                     last_detected_time = sample_time
+                    # Immediate visual confirmation that the glance registered,
+                    # so the player can stay focused on the centre cue.
+                    confirm_until = sample_time + 0.4
 
                     if detected_event == "left":
                         eog_left_commands += 1
@@ -2394,17 +2453,22 @@ def run_game(screen, clock, serial_reader, processor, detector, config):
 
             # Spawn one forced-choice gate row per beat (after the tutorial).
             # The clean gate sits at most one lane away from the player, so every
-            # row needs exactly one deliberate LEFT/RIGHT eye movement (or, on a
-            # rest beat, none) -- never an impossible double saccade.
+            # row needs exactly one deliberate LEFT/RIGHT eye movement -- never an
+            # impossible double saccade. A "rest" gate (clean lane already under
+            # the player) needs no move, but two rest gates never follow each other.
             if elapsed >= next_spawn_time:
                 adjacent_lanes = [
                     lane for lane in (current_lane - 1, current_lane + 1)
                     if 0 <= lane < LANE_COUNT
                 ]
-                if rng.random() < REST_GATE_PROBABILITY or not adjacent_lanes:
+                rest_allowed = not last_gate_was_rest and adjacent_lanes
+                if rest_allowed and rng.random() < REST_GATE_PROBABILITY:
                     goal_lane = current_lane
-                else:
+                elif adjacent_lanes:
                     goal_lane = rng.choice(adjacent_lanes)
+                else:
+                    goal_lane = current_lane
+                last_gate_was_rest = goal_lane == current_lane
                 gates.append({"id": next_gate_id, "goal_lane": goal_lane, "y": ROAD_TOP - GATE_HEIGHT, "resolved": False})
                 next_gate_id += 1
                 log_game_event(event_writer, elapsed, "gate_spawn", current_lane, current_lane, goal_lane, score, streak, lives)
@@ -2424,6 +2488,8 @@ def run_game(screen, clock, serial_reader, processor, detector, config):
                 # Resolve once, by lane, when the row reaches the player band.
                 if not gate["resolved"] and gate["y"] >= PLAYER_Y - GATE_HEIGHT * 0.5:
                     gate["resolved"] = True
+                    # Gate is past: accept the next saccade again.
+                    lane_locked = False
 
                     if current_lane == gate["goal_lane"]:
                         avoided += 1
@@ -2456,8 +2522,42 @@ def run_game(screen, clock, serial_reader, processor, detector, config):
 
             gates = remaining
 
-            player_color = flash_color if elapsed < flash_until else ACCENT
+            if elapsed < confirm_until:
+                player_color = (255, 255, 255)
+            elif elapsed < flash_until:
+                player_color = flash_color
+            else:
+                player_color = ACCENT
             draw_player_impulse(screen, current_lane, player_color)
+
+            # Central steering cue: which way to glance for the nearest gate,
+            # with a shrinking timer ring. Lets the player keep their gaze centred
+            # instead of tracking the descending gate.
+            active_gate = None
+            for gate in gates:
+                if not gate["resolved"] and (active_gate is None or gate["y"] > active_gate["y"]):
+                    active_gate = gate
+
+            if active_gate is not None:
+                goal_lane = active_gate["goal_lane"]
+                if current_lane < goal_lane:
+                    cue_direction = "right"
+                elif current_lane > goal_lane:
+                    cue_direction = "left"
+                else:
+                    cue_direction = "stay"
+                spawn_y = ROAD_TOP - GATE_HEIGHT
+                resolve_y = PLAYER_Y - GATE_HEIGHT * 0.5
+                fraction_remaining = float(np.clip(
+                    (resolve_y - active_gate["y"]) / (resolve_y - spawn_y), 0.0, 1.0))
+                draw_action_cue(
+                    screen,
+                    (WIDTH // 2, HEIGHT // 2 - 10),
+                    cue_direction,
+                    fraction_remaining,
+                    confirmed=elapsed < confirm_until,
+                    locked=lane_locked,
+                )
 
             if elapsed < ONBOARDING_SECONDS:
                 draw_onboarding_hint(screen, current_lane)

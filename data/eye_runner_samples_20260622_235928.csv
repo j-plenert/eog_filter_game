@@ -1,0 +1,1 @@
+time,sample,raw,baseline,highpass,filtered,centered,detected_event,detector_state,current_lane,score,streak,lives,filter_type,baseline_alpha,smoothing_alpha,moving_average_window,threshold_multiplier,refractory_ms

@@ -1,4 +1,4 @@
-# Helmholtz and the Noisepocalypse 🧠⚡
+# Helmholtz and the Noisepocalypse
 
 This is an EOG game to test and play with **digital filtering for eye-movement detection**.
 
@@ -26,13 +26,6 @@ One continuous flow from raw signal to analysis:
 5. **Runner** – steer the impulse into the clean (cyan) gate and dodge the red noise artifacts.
 6. **Analysis** – all data is saved as CSV in `data/`, plus a time/frequency dashboard (Welch PSD) in `plots/`.
 
-## Screenshots
-
-![Filter Builder](images/filter_builder.png)
-![Calibration](images/calibration.png)
-![Runner Game](images/runner_game.png)
-![Final Learning Report](images/filter_report.png)
-
 ## Hardware
 
 - ESP32 (or another compatible microcontroller)
@@ -45,7 +38,7 @@ One continuous flow from raw signal to analysis:
 <p align="left">
   <img src="images/hardware_setup.png"
        alt="Complete hardware setup"
-       width="600">
+       width="500">
 </p>
 
 ESP32, AD8232, electrode cables, USB connection and the computer.
@@ -55,10 +48,6 @@ ESP32, AD8232, electrode cables, USB connection and the computer.
 | `3.3V`   | `3V3`                    |
 | `GND`    | `GND`                    |
 | `OUTPUT` | analog input pin (ADC)   |
-| `LO+`    | digital input (optional) |
-| `LO-`    | digital input (optional) |
-
-The exact analog pin depends on your firmware – update the diagram to match the pin used in your code.
 
 ## Electrode placement (horizontal montage)
 

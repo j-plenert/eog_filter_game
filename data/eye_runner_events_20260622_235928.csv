@@ -1,0 +1,3 @@
+time,event_type,lane_before,lane_after,obstacle_lane,score,streak,lives,details
+4.502607374990475,gate_spawn,1,1,0,0,0,8,
+6.977404207995278,gate_spawn,1,1,0,0,0,8,

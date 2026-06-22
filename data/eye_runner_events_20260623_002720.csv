@@ -1,0 +1,17 @@
+time,event_type,lane_before,lane_after,obstacle_lane,score,streak,lives,details
+0.6170369169994956,eog_left,1,0,,0,0,8,centered_signal=-349.352;movement=lane_changed
+4.5051474169886205,gate_spawn,0,0,1,0,0,8,
+6.908995207995758,gate_spawn,0,0,1,0,0,8,
+8.140103957994143,gate_missed,0,0,1,0,0,7,
+9.303560166998068,gate_spawn,0,0,0,0,0,7,
+9.611382457995205,eog_left,0,0,,0,0,7,centered_signal=-329.539;movement=blocked_at_edge
+10.508437749987934,gate_missed,0,0,1,0,0,6,
+11.113644874989404,eog_left,0,0,,0,0,6,centered_signal=-330.712;movement=blocked_at_edge
+11.716653416995541,gate_spawn,0,0,1,0,0,6,
+12.893822416997864,gate_passed,0,0,0,100,1,6,multiplier=1.0;points=100
+14.110100707999663,eog_left,0,0,,100,1,6,centered_signal=-330.804;movement=blocked_at_edge
+14.110091957991244,gate_spawn,0,0,1,100,1,6,
+15.275373541997396,gate_missed,0,0,1,0,0,5,
+15.602531707991147,eog_left,0,0,,0,0,5,centered_signal=-328.941;movement=blocked_at_edge
+16.510969707989716,gate_spawn,0,0,1,0,0,5,
+17.65064966698992,gate_missed,0,0,1,0,0,4,

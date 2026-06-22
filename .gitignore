@@ -4,4 +4,4 @@ __pycache__/
 eog_experiment_with_welch_psd.py
 filters.py
 record_eog_horizontal.py
-results
+
